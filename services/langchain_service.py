@@ -1,4 +1,3 @@
-
 import logging
 import json
 from typing import Dict, List, Any, Tuple
@@ -20,18 +19,17 @@ load_dotenv()
 
 _rag_service_instance = None
 logger = logging.getLogger(__name__)
+
 def get_rag_service():
-      
-        global _rag_service_instance
-        if _rag_service_instance is None:
-            _rag_service_instance = RAGService()
-        return _rag_service_instance
+    global _rag_service_instance
+    if _rag_service_instance is None:
+        _rag_service_instance = RAGService()
+    return _rag_service_instance
+
 class RAGService:
     def __init__(self):
-        self.processed_dir = os.path.join(os.getcwd(), "processed")
         self.vector_dir = os.path.join(os.getcwd(), "vectorstores")
         
-        os.makedirs(self.processed_dir, exist_ok=True)
         os.makedirs(self.vector_dir, exist_ok=True)
         
         # Initialize embeddings
@@ -46,24 +44,21 @@ class RAGService:
             traceback.print_exc()
             raise
         
-        
+        # Set up LLM
         google_api_key = os.getenv("GOOGLE_API_KEY")
-        print(f"Google API Key: {google_api_key}")
-        # Set up LLM with explicit API key
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-1.5-pro", 
             temperature=0.2,
             google_api_key=google_api_key
         )
        
-        
         # QA prompt template
         self.prompt = PromptTemplate(
             template="""
             You are a helpful assistant. Answer ONLY from the provided context. 
             If the context is insufficient, just say you don't know.
-            you can make conversation with the user, but you should not answer the question directly.
-            If user ask something give answer context from pdf be conversative.
+            You can make conversation with the user, but you should not answer the question directly.
+            If user asks something, give answer context from pdf be conversative.
 
             Context:
             {context}
@@ -75,81 +70,45 @@ class RAGService:
             input_variables=["context", "question"]
         )
         
-        
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000, 
             chunk_overlap=200
         )
         
-        
         self.parser = StrOutputParser()
     
     def is_document_processed(self, document_id: str) -> bool:
-       
+        """Check if vector store exists for document"""
         vector_store_path = os.path.join(self.vector_dir, document_id)
         
-     
         if os.path.exists(vector_store_path) and os.listdir(vector_store_path):
             return True
         return False
     
-    def process_document_for_rag(self, document_id: str) -> bool:
-        
-        processed_file = os.path.join(self.processed_dir, f"{document_id}.json")
-        
-        if not os.path.exists(processed_file):
-            logger.error(f"Processed document {document_id} not found")
-            return False
-        
+    def process_text_for_rag(self, document_id: str, text: str) -> bool:
+        """Process text directly for RAG without requiring processed files"""
         try:
-            # Load the processed document
-            with open(processed_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            logger.info(f"Processing text for RAG: document_id={document_id}")
             
-            full_text = data.get("full_text", "")
-            
-            if not full_text.strip():
+            if not text.strip():
                 logger.error(f"Document {document_id} has no text content")
                 return False
                 
-            pages = data.get("pages", [])
+            # Create a document from text
+            doc = Document(
+                page_content=text,
+                metadata={"document_id": document_id, "page": 0}
+            )
             
-         
-            documents = []
-            
-            if not pages:
-                
-                doc = Document(
-                    page_content=full_text,
-                    metadata={"page": 0, "document_id": document_id}
-                )
-                documents.append(doc)
-            else:
-                for page in pages:
-                    page_text = page.get("text", "").strip()
-                    if page_text: 
-                        doc = Document(
-                            page_content=page_text,
-                            metadata={"page": page.get("page_num", 0), "document_id": document_id}
-                        )
-                        documents.append(doc)
-            
-            
-            if not documents:
-                logger.error(f"No valid documents created for {document_id}")
-                return False
-                
+            # Create vector store directory
             vector_store_path = os.path.join(self.vector_dir, document_id)
-            
             if os.path.exists(vector_store_path):
                 import shutil
                 shutil.rmtree(vector_store_path)
-                os.makedirs(vector_store_path, exist_ok=True)
-            else:
-                os.makedirs(vector_store_path, exist_ok=True)
+            os.makedirs(vector_store_path, exist_ok=True)
             
-
-            chunks = self.text_splitter.split_documents(documents)
+            # Split text into chunks
+            chunks = self.text_splitter.split_documents([doc])
             
             logger.info(f"Created {len(chunks)} chunks for document {document_id}")
             
@@ -157,34 +116,21 @@ class RAGService:
                 logger.error(f"No chunks created for document {document_id}")
                 return False
             
+            # Create vector store
             vector_store = FAISS.from_documents(chunks, self.embeddings)
             vector_store.save_local(vector_store_path)
             
             logger.info(f"Vector store created for document {document_id}")
-          
+            
+            # Verify vector store was created
             if not os.path.exists(vector_store_path) or not os.listdir(vector_store_path):
                 logger.error(f"Vector store creation failed for {document_id}")
                 return False
-            
-            metadata_file = os.path.join(self.processed_dir, f"{document_id}_metadata.json")
-            if os.path.exists(metadata_file):
-                try:
-                    with open(metadata_file, "r") as f:
-                        metadata = json.load(f)
-                    
-                    metadata["rag_processed"] = True
-                    metadata["rag_processed_at"] = time.time()
-                    metadata["chunks_count"] = len(chunks)
-                    
-                    with open(metadata_file, "w") as f:
-                        json.dump(metadata, f)
-                except Exception as e:
-                    logger.error(f"Error updating metadata: {str(e)}")
-            
+                
             return True
             
         except Exception as e:
-            logger.error(f"Error processing document for RAG: {str(e)}")
+            logger.error(f"Error processing text for RAG: {str(e)}")
             traceback.print_exc()
             return False
     
@@ -193,10 +139,7 @@ class RAGService:
         vector_store_path = os.path.join(self.vector_dir, document_id)
         
         if not os.path.exists(vector_store_path) or not os.listdir(vector_store_path):
-            # Try to process the document
-            success = self.process_document_for_rag(document_id)
-            if not success:
-                raise FileNotFoundError(f"Vector store for document {document_id} not found or creation failed")
+            raise FileNotFoundError(f"Vector store for document {document_id} not found")
         
         try:
             # Force CPU for FAISS loading if needed
@@ -204,7 +147,6 @@ class RAGService:
             if hasattr(self.embeddings, "client") and hasattr(self.embeddings.client, "device"):
                 device = self.embeddings.client.device
                 if device != "cpu":
-                   
                     self.embeddings.client = self.embeddings.client.to("cpu")
             
             # Load the vector store
@@ -226,39 +168,14 @@ class RAGService:
             return retriever
         except Exception as e:
             logger.error(f"Error getting retriever: {str(e)}")
-            # If it fails, try rebuilding the vector store
-            self.process_document_for_rag(document_id)
-            # Try one more time with simpler approach
-            vector_store = FAISS.load_local(vector_store_path, self.embeddings, allow_dangerous_deserialization=True)
-            return vector_store.as_retriever(search_type="similarity", search_kwargs={"k": top_k})
-            
-            vector_store_path = os.path.join(self.vector_dir, document_id)
-            
-            if not os.path.exists(vector_store_path) or not os.listdir(vector_store_path):
-                # Try to process the document
-                success = self.process_document_for_rag(document_id)
-                if not success:
-                    raise FileNotFoundError(f"Vector store for document {document_id} not found or creation failed")
-            
-            # Load the vector store
-            vector_store = FAISS.load_local(vector_store_path, self.embeddings,allow_dangerous_deserialization=True)
-            
-            # Create retriever
-            retriever = vector_store.as_retriever(
-                search_type="similarity", 
-                search_kwargs={"k": top_k}
-            )
-            
-            return retriever
+            raise
     
     def build_rag_chain(self, document_id: str, top_k: int = 2):
         """Build a RAG chain for a document"""
         retriever = self.get_retriever(document_id, top_k)
         
-        
         def format_docs(retrieved_docs):
             return "\n\n".join(doc.page_content for doc in retrieved_docs)
-        
         
         parallel_chain = RunnableParallel({
             'context': retriever | RunnableLambda(format_docs),
@@ -267,13 +184,11 @@ class RAGService:
         
         # Create main chain
         chain = parallel_chain | self.prompt | self.llm | self.parser
-      
-
         
         return chain, retriever
     
     def process_question(self, document_id: str, question: str, top_k: int = 2) -> Tuple[str, List[Document]]:
-   
+        """Process a question for a document"""
         try:
             logger.info(f"Processing question for document {document_id}: {question}")
             
@@ -281,12 +196,8 @@ class RAGService:
                 torch.cuda.empty_cache()
                 
             if not self.is_document_processed(document_id):
-             
-                success = self.process_document_for_rag(document_id)
-                if not success:
-                    raise Exception("Document is not yet processed. Please wait and try again.")
+                raise Exception("Document is not processed for RAG. Please try again later.")
             
-         
             chain, retriever = self.build_rag_chain(document_id, top_k)
             
             # Get source documents

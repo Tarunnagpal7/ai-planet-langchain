@@ -36,11 +36,6 @@ async def ask_question(request: QuestionRequest):
    
     document_id = request.document_id
     
-    
-    document_path = os.path.join(os.getcwd(), "uploads", f"{document_id}.pdf")
-    if not os.path.exists(document_path):
-        raise HTTPException(status_code=404, detail="Document not found")
-    
     try:
         rag_service = get_rag_service()
         
