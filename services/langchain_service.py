@@ -47,7 +47,6 @@ class RAGService:
             raise
         
         
-        # google_api_key = "AIzaSyDiLFpADAFzHAqaA5NRSRvUPtvMKyIPq7Q"
         google_api_key = os.getenv("GOOGLE_API_KEY")
         print(f"Google API Key: {google_api_key}")
         # Set up LLM with explicit API key
