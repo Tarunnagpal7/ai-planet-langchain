@@ -1,0 +1,30 @@
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Ignore virtual environments
+myenv/
+venv/
+
+# Ignore environment variable files
+.env
+
+# Ignore logs
+*.log
+
+# Ignore build and dist folders (if packaging)
+build/
+dist/
+*.egg-info/
+
+# Ignore IDE-specific files
+.vscode/
+.idea/
+
+# Ignore database files (if using SQLite locally)
+*.sqlite3
+
+# Ignore OS-generated files
+.DS_Store
+Thumbs.db
